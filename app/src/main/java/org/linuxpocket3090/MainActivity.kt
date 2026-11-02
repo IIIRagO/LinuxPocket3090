@@ -1,6 +1,9 @@
 package org.linuxpocket3090
 
 import android.os.Bundle
+import android.os.Build
+import android.os.Environment
+import android.os.StatFs
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -24,6 +27,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun LinuxPocketApp() {
     var command by remember { mutableStateOf("") }
+    val storage = StatFs(Environment.getDataDirectory().path)
+val freeStorageGb = storage.availableBytes / (1024.0 * 1024.0 * 1024.0)
+
+val deviceInfo = "Android: ${Build.VERSION.RELEASE}\n" +
+    "CPU: ${Build.SUPPORTED_ABIS.joinToString()}\n" +
+    "Free storage: ${String.format("%.2f", freeStorageGb)} GB"
     var output by remember {
         mutableStateOf("LinuxPocket 3090\nRootless Linux environment\n\nRuntime not installed yet.")
     }
