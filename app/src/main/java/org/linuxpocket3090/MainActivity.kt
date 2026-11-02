@@ -49,6 +49,7 @@ val deviceInfo = "Android: ${Build.VERSION.RELEASE}\n" +
             )
 
             Text("Rootless Linux for Android")
+            Text(deviceInfo)
 
             Spacer(modifier = Modifier.height(16.dp))
 
