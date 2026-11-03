@@ -38,7 +38,7 @@ private fun readTarNumber(bytes: ByteArray, start: Int, length: Int): Long {
 
 private fun extractProotArchive(context: android.content.Context): File {
     val archive = context.assets.open(
-        "proot-android-armv7a.tar.gz"
+        "proot-android-armv7a (1).tar.gz"
     )
 
     val root = File(context.filesDir, "proot")
