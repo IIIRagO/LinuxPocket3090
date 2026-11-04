@@ -214,8 +214,16 @@ fun LinuxPocketApp() {
                             "Exit code: $exitCode\n" +
                             "Output:\n$response"
                         } catch (error: Exception) {
-                            "PRoot setup failed:\n${error.message}"
-                        }
+    val assetNames = try {
+        context.assets.list("")?.joinToString(", ") ?: "(none)"
+    } catch (listError: Exception) {
+        "Could not list assets: ${listError.message}"
+    }
+
+    "PRoot setup failed:\n" +
+    "Error: ${error.javaClass.simpleName}: ${error.message}\n" +
+    "Assets packaged in APK: ${assetNames}"
+}
 
                         (context as ComponentActivity).runOnUiThread {
                             output = result
