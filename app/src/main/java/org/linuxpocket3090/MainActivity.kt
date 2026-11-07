@@ -36,13 +36,16 @@ private fun readTarNumber(bytes: ByteArray, start: Int, length: Int): Long {
     return if (value.isEmpty()) 0L else value.toLong(8)
 }
 
-private fun extractProotArchive(context: android.content.Context): File {
-    val archive = context.assets.open(
-        "proot-android-armv7a (1).tar.gz"
-    )
 
+private fun extractProotArchive(context: android.content.Context): File {
+    val archiveName = "proot-android-armv7a (1).tar.gz"
     val root = File(context.filesDir, "proot")
-    if (!root.exists() && !root.mkdirs()) {
+
+    if (root.exists() && !root.deleteRecursively()) {
+        throw Exception("Cannot clean old PRoot directory")
+    }
+
+    if (!root.mkdirs()) {
         throw Exception("Cannot create PRoot directory")
     }
 
@@ -52,7 +55,12 @@ private fun extractProotArchive(context: android.content.Context): File {
         "root/libexec/proot/loader"
     )
 
-    GZIPInputStream(BufferedInputStream(archive)).use { gzip ->
+    val extracted = mutableSetOf<String>()
+
+    GZIPInputStream(
+        BufferedInputStream(context.assets.open(archiveName))
+    ).use { gzip ->
+
         while (true) {
             val header = ByteArray(512)
             var offset = 0
@@ -64,88 +72,96 @@ private fun extractProotArchive(context: android.content.Context): File {
             }
 
             if (offset == 0) break
+
             if (offset != 512) {
                 throw Exception("Incomplete TAR header")
             }
 
             if (header.all { it == 0.toByte() }) break
 
-            val name = String(header, 0, 100)
-                .trimEnd('\u0000')
-            val prefix = String(header, 345, 155)
-                .trimEnd('\u0000')
+            val name = String(header, 0, 100).trimEnd('\u0000')
+            val prefix = String(header, 345, 155).trimEnd('\u0000')
 
-            val path = if (prefix.isEmpty()) name else "$prefix/$name"
+            val path = (if (prefix.isEmpty()) name else "$prefix/$name")
+                .removePrefix("./")
+
             val size = readTarNumber(header, 124, 12)
             val type = header[156].toInt().toChar()
 
             if (size < 0 || size > 2_000_000) {
-                throw Exception("Unexpected archive file size")
+                throw Exception("Invalid archive file size")
             }
 
-            if (type == '0' || type == '\u0000') {
-                if (path !in allowedFiles) {
-                    throw Exception("Unexpected archive entry: $path")
-                }
+            val shouldExtract =
+                (type == '0' || type == '\u0000') &&
+                path in allowedFiles
 
-                val destination = File(root, path.removePrefix("root/"))
-                if (!destination.canonicalPath.startsWith(root.canonicalPath + File.separator)) {
+            val destination = if (shouldExtract) {
+                File(root, path.removePrefix("root/"))
+            } else {
+                null
+            }
+
+            if (destination != null) {
+                if (!destination.canonicalPath.startsWith(
+                        root.canonicalPath + File.separator
+                    )
+                ) {
                     throw Exception("Unsafe archive path")
                 }
 
                 destination.parentFile?.mkdirs()
-
-                destination.outputStream().use { output ->
-                    var remaining = size
-                    val buffer = ByteArray(8192)
-
-                    while (remaining > 0) {
-                        val count = gzip.read(
-                            buffer,
-                            0,
-                            minOf(buffer.size.toLong(), remaining).toInt()
-                        )
-                        if (count < 0) throw Exception("Incomplete archive file")
-                        output.write(buffer, 0, count)
-                        remaining -= count
-                    }
-                }
-
-                destination.setExecutable(true, true)
-            } else {
-                var remaining = size
-                while (remaining > 0) {
-                    val skipped = gzip.skip(remaining)
-                    if (skipped <= 0) {
-                        if (gzip.read() < 0) throw Exception("Incomplete archive")
-                        remaining--
-                    } else {
-                        remaining -= skipped
-                    }
-                }
             }
 
-            val padding = (512 - (size % 512)) % 512
-            var remainingPadding = padding
-            while (remainingPadding > 0) {
-                val skipped = gzip.skip(remainingPadding)
-                if (skipped <= 0) {
-                    if (gzip.read() < 0) throw Exception("Incomplete archive padding")
-                    remainingPadding--
-                } else {
-                    remainingPadding -= skipped
+            val output = destination?.outputStream()
+
+            try {
+                var remaining = size
+                val buffer = ByteArray(8192)
+
+                while (remaining > 0) {
+                    val count = gzip.read(
+                        buffer,
+                        0,
+                        minOf(buffer.size.toLong(), remaining).toInt()
+                    )
+
+                    if (count < 0) {
+                        throw Exception("Incomplete archive data")
+                    }
+
+                    output?.write(buffer, 0, count)
+                    remaining -= count
                 }
+            } finally {
+                output?.close()
+            }
+
+            if (destination != null) {
+                destination.setExecutable(true, true)
+                extracted.add(path)
+            }
+
+            var padding = (512 - (size % 512)) % 512
+
+            while (padding > 0) {
+                val count = gzip.read()
+                if (count < 0) {
+                    throw Exception("Incomplete archive padding")
+                }
+                padding--
             }
         }
+    }
+
+    if (!extracted.containsAll(allowedFiles)) {
+        val missing = allowedFiles - extracted
+        throw Exception("Missing PRoot files: $missing")
     }
 
     val proot = File(root, "bin/proot")
     val userland = File(root, "bin/proot-userland")
     val loader = File(root, "libexec/proot/loader")
-
-    if (!proot.isFile || !userland.isFile || !loader.isFile) {
-        throw Exception("One or more PRoot files are missing")
-    }
 
     proot.setExecutable(true, true)
     userland.setExecutable(true, true)
